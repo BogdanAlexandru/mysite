@@ -1,6 +1,6 @@
 ---
-title: Random Locations inside Polygons in Unity
-date: 2018-01-14
+title: Random Locations within Polygons in Unity
+date: 2018-01-20
 ---
 
 This post follows a discussion on **/r/gamedev's** Discord server, which was about giving NPCs large areas to roam within, as a possible alternative to using separate agent types & walkable areas (part of Unity's builtin NavMesh tools).

@@ -1,122 +1,379 @@
 ---
-title: RPG with Player-Defined AI - Part 1
-date: 2018-01-14
+title: RPG Combat AI with If-Then Rules in Unity
+date: 2018-02-05
 published: false
 ---
 
-I tried to pick a fun theme for this. I think RPGs are fun, you (hopefully) think RPGs are fun, everyone (maybe) thinks RPGs are fun. So I'll do an RPG but give it a twist so it's not just another entry in the plethora of "how to do an RPG in Unity" tutorials out there. In fact, this won't be that much of a tutorial, more like an implementation overview and discussion.
+Final Fantasy XII has one of the most interesting features I've seen in games up to date: the Gambit system. It provides a neat way to program the AI of your party's characters using "if-then" rules. It's clever, simple, and perfectly usable. The system is extensively described on the [Final Fantasy wiki](http://finalfantasy.wikia.com/wiki/Gambits), if you're curious about its intricacies.
 
-It's all about Unity and C#. Readers at all levels should be able to extract ideas from this, but for the best value for your time you want to have at least some experience with Unity and an intermediate understanding of C#. It may help to also be familiar with the basic concepts of functional programming.
+A while ago I was wondering what it'd take to get something like it up and running in Unity, and the following prototype is the result. It's definitely rough around the edges, but worked on some more it could prove to be a great way to get clever-looking AIs up and running. I can see it being applicable not only to RPGs but also other game genres where there are direct confrontations between multiple characters, with both offensive and support mechanics.
 
-Before we begin, most of what I'll show here uses visual assets obtained from Unity's store. I just mixed and matched models and visual effects. Special thanks goes to **Cedric Hutchings** for the Robin Hood-style hat he modeled for one of the skeletons. As far as I know, his is at the time of writing the only hat of its kind on the web! You can find it here: [OpenGameArt.org](https://opengameart.org/content/robin-hood-hat)
+A short gameplay video is here:
 
-Let's go!
+<center>
+<iframe width="590" height="430" src="https://www.youtube.com/embed/-XMi4J_4RCI" frameborder="0" allowfullscreen></iframe>
+</center>
 
-## What are we making?
+This post will discuss the core of the AI system only — the rest of the systems, even though visible in the gameplay video, will be treated as black boxes. For starters, they're there just to provide something to get the action running. As such, they're incomplete and not very interesting to talk about. They're, however, very likely to be the focus of a few different articles in the future; I feel the prototype is worth working on further.
 
-A real time party based RPG with player-defined scripts for their characters' behavior in combat. That doesn't sound like a novel concept and indeed these mechanics have been a thing for a long time. It's just that in some games they were more central to the gameplay than in others. What we're going for is something similar to the *gambits* in Final Fantasy XII. Or at least my recollection of them.
+<div class="in-article-question">
+<h3>Note</h3>
+Most of what I'll show here uses visual assets obtained from Unity's store. I just mixed and matched models and visual effects. Special thanks goes to **Cedric Hutchings** for the Robin Hood-style hat he modeled for one of the skeletons. As far as I know, his is at the time of writing the only hat of its kind on the web! You can find it here: [OpenGameArt.org](https://opengameart.org/content/robin-hood-hat)
+</div>
 
-<center><a target="_blank" href="/images/ffgambits.jpg"><img style="width:600px" src="/images/ffgambits.jpg" /><a/></center>
-<center>*Final Fantasy XII; Source: Mobygames*</center>
+## Overview
 
-The player will control a party that consists of, at least for now, three characters: a Dragon Knight, a Sorceress and a Priest. Excellent synergy, I'd have added a Ranger too but there were no Rangers on the asset store that would try to fit in with the rest of the assets. A pity, but it's not a crucial flaw. There's a skeleton shooting bolts at us later down the line, for fans of ranged weaponry. Besides, I only had one ranger hat and the skeleton claimed it first.
+<center>
+<img src="/images/skeles.png"/>
 
-The player can directly control one of the characters at a time, and the rest of the party will follow. When in combat, the player can give orders to the selected character, while the others will follow a player-defined combat routine.
+*The relevant components of a character doing battle.*
+</center>
 
-For this first part, the party is set to do some combat with a skeleton band that consists of a skeleton archer (actually using a crossbow, but I doubt many people search for "skeleton crossbowman" on Google), a skeleton warrior and a skeleton. The last guy's equipment budget was even lower than my assets budget, in case you were wondering.
+These are the rules for the prototype:
 
-<center><a target="_blank" href="/images/battle.png"><img style="width:600px" src="/images/battle.png" /><a/></center>
-<center>*Our game! The battle rages on...*</center>
+* Combat is done between `GameCharacter`s of opposing factions (in video you can see the Human and Undead factions at work - they're enemies).
+* Each `GameCharacter` has a `CombatAI` component that allows it to perform `CharacterAction`s, meaning actions by characters targeted at characters.
+* `CharacterAction`s are performed via the appropriate `CharacterAbility`. `UseItemAction` is thus performed by the `ItemUseAbility`.
+* When at any point in time a character finds itself having no assigned `CharacterAction`, the `CombatAI` goes through the character's combat rules and tries to pick one.
+* When an action has been picked:
+    * The character starts walking towards the target in order to get into the appropriate range for the action.
+    * At the same time a delay countdown is started; some actions have a longer delay than others.
+    * When the target is in range and the delay has passed:
+        * Perform the action
+        * When the action has finished performing, go back to picking another.
 
-## Let's describe the whole AI thing
+## The `CombatAI`
 
-If you've gone this far chances are you want to hear about the player-scriptable combat AI, unless you can't get enough of articles showing you how to do an inventory system, which is fine I don't judge, but that comes a bit later.
-
-I'll first describe how the combat system ought to work and then try to put it in context, to show how it ties to the rest of the game.
-
-I mentioned Final Fantasy XII as a source of inspiration, and if you checked out the screenshot I also added you may have already gotten an idea of where we're going with this.
-
-Each party character (and NPC, though the player doesn't see that) has a sort of *combat script* attached to them, which is really a list of rules they must follow when doing combat. We can call the rules `if-then` rules which is accurate enough especially in the context of FF XII, though we'll see that during implementation we gain a bunch of benefits if we think of them as something more along the lines of `filter-select-maybeThen` rules.
-
-Here's a small script:
-
-```java
-(Ally: HP < 30%) -> Cast Heal
-(Enemy: Nearest) -> Attack
-```
-
-Every time a character finds itself to be sitting idle in combat, they'll execute this script, trying to find a valid action to perform next. They try out `(Ally: HP < 30%)` but there's no ally with less than 30% hitpoints in combat. So they find the nearest enemy to them via `(Enemy: Nearest)`, and jump in for one attack. After that attack finishes, they re-run the script, and pick the *first action whose condition passes*.
-
-This is how we define a `CombatRule`:
+The `CombatAI` class encapsulates the logic described in the rules above. It's fairly straightforward:
 
 ```cs
-// Self in this context represents the GameCharacter that owns
-// the combat AI rule.
-// Some filters are only relevant relative to him/her 
-// e.g. FarthestCharacter
-public class CombatRule
+// The Combat AI class with non-critical
+// code removed.
+public class CombatAI : MonoBehaviour
 {
     private GameCharacter _self;
-    private IList<ICharacterFilter> _filters;
-    private ITargetSelector _selector;
+    public Gambit CombatGambit;
+    private ActionWrapper _activeAction;
 
-    private Func<GameCharacter, GameCharacter, CombatAction> 
-        _actionCreator;
+    private void PickNextAction()
+    {
+        var matchedRule = CombatGambit.FindMatchingRule(_self, 
+            otherCombatants);
+        if (matchedRule == null)
+        {
+            return;
+        }
 
-    // Implementation here.
+        var action = matchedRule.Action;
+        var target = matchedRule.Target;
+        
+        // MakeNew returns an ActionWrapper.
+        // Explained later on.
+        _activeAction = action.MakeNew(_self, target);
+        _activeAction.Prepare();
+
+        StartDelay(_activeAction);
+    }
+
+    public void Update()
+    {
+        if (_delayActive)
+        {
+            UpdateDelay();
+        }
+        
+        if (!delay_Active && _activeAction != null)
+        {
+            if (_activeAction.NotPerformed() && _activeAction.Ready())
+            {
+                _activeAction.Perform();
+            }
+            else if (_activeAction.DonePerforming())
+            {
+                _activeAction = null;
+            }
+        }
+
+        if (_activeAction == null)
+        {
+            PickNextAction();
+        }
+    }
 }
 ```
 
-From a programming standpoint, there's really no difference between `ITargetSelector` and `ICharacterFilter`. The `ITargetSelector` acts like a first filter, which decides whether the rule will apply the filters that follow to `Self`, `Enemies` or `Allies`. Having this as the first required filter avoids issues of ambiguity (imagine a rule with `HP >30%` as the only filter and no target selector: allies, self and enemies can make the check pass — which do we choose?) so it's mostly a thing to make programming and testing rules less bug prone in the future.
+Essentially, it takes the `Gambit` assigned to the owning character, and as long as there's no action already chosen, it keeps on trying to get one by executing the rules in the `Gambit`.
 
-^ BAD SOUNDING
+## The `Gambit`
 
-`ICharacterFilter` asks that implementers feature a 
+This is actually a misnomer, but I decided to roll with it anyway. What FF XII calls *gambits* I call *rules*, and I chose the name *gambit* for the entire set of rules. It doesn't make much sense when you think of it, but the name stuck and causes no issues so with that out of the way...
 
 ```cs
-IEnumerable<GameCharacter> Filter(GameCharacter self, 
-    IEnumerable<GameCharacter> characters);
+public class Gambit : ScriptableObject
+{
+    public List<CombatRule> Rules = new List<CombatRule>();
+
+    // Self denotes the character who owns the Gambit.
+    public RuleMatch FindMatchingRule(GameCharacter self, 
+        List<GameCharacter> others)
+    {
+        foreach (var rule in Rules)
+        {
+            var target = rule.TryPickingTarget(self, others);
+            // CanPerform() represents an implied condition of sorts.
+            // Each action type can define its own.
+            // But to give an idea, an implied condition for the
+            // UseItem action is that the character (self) needs
+            // to have at least one of the used item in its inventory.
+            if (target != null && rule.Action.CanPerform(self, target))
+            {
+                return new RuleMatch(rule.Action, target);
+            }
+        }
+        return null;
+    }
+}
 ```
 
-function. Given the shape of the function, we can easily chain filters together. Nearest character that has health below 50 percent? Run the `StatsBelowPercent` filter to get the characters that have health below 50%, then run the `NearestCharacter` filter to pick the one closest to `Self`.
+We want for the gambits to be tweakable in the editor while the game is running, and also have the changes saved once play mode is exited. Each gambit gets to sit in its own asset, and the same gambit can be assigned to any `GameCharacter`. Hence the `ScriptableObject` approach.
 
-Filter implementation is straightforward. Here's one, that picks the nearest character to `Self`:
+For example, a group of orcs could use only a couple of gambits: `Aggressive Orc Gambit` and `Orc Priest Gambit`. In the prototype scene there's a gambit for each one of the party members (a dragon knight, a sorceress and a priest), and another gambit shared by all the skeletons (which has a single rule: attack the closest enemy), except for the skeleton mage, who has his own gambit.
+
+<center>
+<img src="/images/gambit2.png"/>
+
+*A few gambits*
+</center>
+
+<center>
+<img src="/images/gambit3.png"/>
+
+*A Combat AI component with the Dragon Knight gambit assigned. The `CombatAI` component resides on the `GameCharacter`'s `GameObject`.*
+</center>
+
+The gambit has a custom inspector written for it, allowing for easier changing of the rules within.
+
+<center>
+<img src="/images/gambit1.png"/>
+
+*The custom inspector for the priest's gambit. It's not very pretty but it does the job.*
+</center>
+
+## The `CombatRule`
 
 ```cs
-public class NearestCharacter : ICharacterFilter
+public class CombatRule
+{
+    public GambitTargetSelector TargetSelector;
+    public List<GambitTargetFilter> Filters = new List<GambitTargetFilter>();
+    public CharacterAction Action;
+
+    // The distinction between Self and Others here is needed:
+    // Both the Self selector and some filters are only
+    // relevant relative to the given character.
+    // For example: Nearest.
+    public GameCharacter TryPickingTarget(GameCharacter self, 
+        List<GameCharacter> others)
+    {
+        var candidates = TargetSelector.SelectTargets(self, others);
+        if (candidates == null || !candidates.Any())
+        {
+            return null;
+        }
+        
+        foreach (var filter in Filters)
+        {
+            candidates = filter.Filter(self, candidates);
+        }
+
+        return candidates.FirstOrDefault();
+    }
+}
+```
+
+The `CombatRule` is as plain as it can get. It holds the selector, filters and action and provides an easy way to attempt to find a target among the passed-in characters.
+
+## The `Selector`s and `Filter`s
+
+<div class="in-article-question">
+<h3>Note</h3>
+Using **LINQ** for the filters was an easy choice, the functional style is the perfect fit. 
+
+In a real project however, this would have to be optimized away; the allocation frenzy just won't scale nicely with the number of characters fighting and with the size of the gambits.
+</div>
+
+Selectors and filters are very much alike.
+
+```cs
+public abstract class TargetSelector : ScriptableObject
+{
+    public abstract IEnumerable<GameCharacter> SelectTargets(GameCharacter self, 
+        IEnumerable<GameCharacter> candidates);
+}
+
+public abstract class TargetFilter : ScriptableObject
+{
+    public abstract IEnumerable<GameCharacter> Filter(GameCharacter self, 
+        IEnumerable<GameCharacter> candidates);
+}
+```
+
+Selectors pick between `Self`, `Allies` and `Enemies` as the subset of characters to apply filters on. Filters further reduce the space used to pick a target. A `Rule` with no `Filter`s will return the first element of the result of applying the selector onto the list of combatants. 
+
+<center>
+<img src="/images/select.png"/>
+
+*Some selector assets.*
+</center>
+
+For example, a rule with the `Enemies` selector and no filters will return the first enemy in the list.
+
+A rule with the `Enemies` selector and the `Health below 20%` and `Nearest` filters will return the enemy that has health below 20% and is nearest to the character.
+
+A rule with the `Enemies` selector and the `Nearest` and `Health below 20%` filters will not find a target unless the nearest enemy to the character has health below 20%.
+
+```cs
+// The selector for allies.
+public class AllyTargetSelector : TargetSelector
+{
+    public override IEnumerable<GameCharacter> SelectTargets(GameCharacter self, 
+        IEnumerable<GameCharacter> candidates)
+    {
+        return candidates.Where(c => Diplomacy.AreAllies(self, c));
+    }
+}
+
+// The two filters mentioned above.
+public class HealthBelowPercentageGambitFilter : TargetFilter
+{
+    [Range(0f, 100f)]
+    public float Percentage;
+
+    public override IEnumerable<GameCharacter> Filter(GameCharacter self, 
+        IEnumerable<GameCharacter> candidates)
+    {
+        return candidates.Where(x =>
+        {
+            var stat = x.Stats.Health;
+            return stat.Value < (Percentage / 100f * stat.MaxValue);
+        });
+    }
+}
+
+public class NearestFilter : TargetFilter
 {
     private float DistanceBetween(GameCharacter c1, GameCharacter c2)
     {
-        return Vector3.Distance(c1.transform.position,
-            c2.transform.position
-        );
+        return Vector3.Distance(c1.transform.position, c2.transform.position);
     }
 
-    public IEnumerable<GameCharacter> Filter(GameCharacter self, 
-        IEnumerable<GameCharacter> characters)
+    public override IEnumerable<GameCharacter> Filter(GameCharacter self, 
+        IEnumerable<GameCharacter> others)
     {
-        Func<GameCharacter, float> distance = 
-            (other) => DistanceBetween(self, other);
-
-        return new[] { characters.MinBy(distance) };
+        Func<GameCharacter, float> distance = (other) => DistanceBetween(self, other);
+        if (others.Any())
+        {
+            return new[] { others.MinBy(distance) };
+        }
+        return others;
     }
 }
 ```
 
-<div class="in-article-question">
-In case you were wondering, `MinBy` up above is brought by [MoreLINQ](https://github.com/morelinq/MoreLINQ). Together with his brother `MaxBy`, they're two very useful operators that unfortunately aren't part of LINQ proper. Finding the object that has the least or most of something is a pattern that shows up in my projects all the time.
-</div>
+<center>
+<img src="/images/filters.png"/>
 
-Filters are not commutative:
+*Some filter assets.*
+</center>
+
+The filters and selectors represent most of the boilerplate work of this whole prototype. This is because a new asset/SO instance needs to be created for each separate filter. On the upside, they need to only be created once and you're done.
+
+For some projects a simple health/mana filter split such as 10%, 20%, 30%... may not be enough. In those cases it's very much doable to get to have a single `HealthFilter` or even a general `StatFilter` SO class and have each gambit specify its own values. The basic idea is to decouple the state of the filter from the type of the filter, and treat the filter type as a sort of dictionary key. Essentially, the rules would stop containing filters and instead would contain pairs of filters with their associated data (serialized as part of the gambit that owns it). The custom editor would have to keep these in sync.
+
+
+## The `CharacterAction`
 
 ```cs
-// Fails if the nearest character's health
-// isn't below 60%.
-NearestCharacter() -> StatsBelowPercent(Health, 60)
-
-// Fails only if there are no characters
-// with health below 60%.
-StatsBelowPercent(Health, 60) -> NearestCharacter()
+public abstract class CharacterAction : ScriptableObject
+{
+    public abstract string Name { get; }
+    public abstract float CombatDelay(GameCharacter self);
+    public abstract bool CanPerform(GameCharacter self, 
+        GameCharacter target);
+    public abstract ActionWrapper MakeNew(GameCharacter self, 
+        GameCharacter target);
+}
 ```
 
-so the order they're executed in (which depends on the order they're appended to a `CombatRule` in) matters.
+There are three types of actions: `AttackAction`, `CastSpellAction` and `UseItemAction`. Each one derives from `CharacterAction` and aside from the `AttackAction`, there's one asset per spell/item.
+
+<center>
+<img src="/images/acts.png"/>
+
+*Spell action assets.*
+</center>
+
+```cs
+public class CastSpellAction : CharacterAction
+{
+    public override string Name => "Spell: " + Spell.Name;
+
+    public Spell Spell;
+
+    public override float CombatDelay(GameCharacter self)
+    {
+        return self.Spellcasting.CombatDelayFor(Spell);
+    }
+
+    public override bool CanPerform(GameCharacter self, 
+        GameCharacter target)
+    {
+        return self.Spellcasting.CanCast(Spell);
+    }
+
+    public override ActionWrapper MakeNew(GameCharacter self, 
+        GameCharacter target)
+    {
+        return new CastSpellActionWrapper(self, target, Spell, Name);
+    }
+}
+```
+
+In a real project the Actions would represent most of the SO asset boilerplate. However, they can all be automatically generated. When adding a new spell or item to the game, automatically generate the `CastSpellAction` or `UseItemAction` assets for it.
+
+## The `ActionWrapper`
+
+The action SOs hold no state related to the characters performing actual actions, they just contain the details for how the action should proceed and a helper for the implied condition checks. 
+
+We need to have a handy way of actually triggering the actions, seeing when they complete and so on. The `ActionWrapper` is essentially a proxy for the `CombatAI` to check on the state of the `CharacterAbility` performing the action. It's meant to only be valid for a single action execution. It's a plain class.
+
+```cs
+// Non-critical code removed.
+public abstract class ActionWrapper
+{
+    protected CharacterAbility _ability;
+
+    // ctor omitted
+
+    public void Prepare();
+    public bool ReadyToPerform();
+    public bool FinishedPerforming();
+
+    public abstract void Perform();
+}
+```
+
+```cs
+
+public class CastSpellActionWrapper : ActionWrapper
+{
+    private Spell _spell;
+
+    // ctor omitted
+
+    public override void Perform()
+    {
+        ((SpellcastAbility)_ability).CastSpellOn(Target, _spell);
+    }
+}
+```
