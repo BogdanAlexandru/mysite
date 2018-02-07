@@ -4,6 +4,8 @@ date: 2018-02-05
 published: false
 ---
 
+# PREVIEW VERSION
+
 Final Fantasy XII has one of the most interesting features I've seen in games up to date: the Gambit system. It provides a neat way to program the AI of your party's characters using "if-then" rules. It's clever, simple, and perfectly usable. The system is extensively described on the [Final Fantasy wiki](http://finalfantasy.wikia.com/wiki/Gambits), if you're curious about its intricacies.
 
 A while ago I was wondering what it'd take to get something like it up and running in Unity, and the following prototype is the result. It's definitely rough around the edges, but worked on some more it could prove to be a great way to get clever-looking AIs up and running. I can see it being applicable not only to RPGs but also other game genres where there are direct confrontations between multiple characters, with both offensive and support mechanics.
@@ -151,12 +153,10 @@ For example, a group of orcs could use only a couple of gambits: `Aggressive Orc
 *A Combat AI component with the Dragon Knight gambit assigned. The `CombatAI` component resides on the `GameCharacter`'s `GameObject`.*
 </center>
 
-The gambit has a custom inspector written for it, allowing for easier changing of the rules within.
+The gambit has a custom inspector written for it, allowing for easier changing of the rules within. This video illustrates the process nicely:
 
 <center>
-<img src="/images/gambit1.png"/>
-
-*The custom inspector for the priest's gambit. It's not very pretty but it does the job.*
+<iframe width="590" height="430" src="https://www.youtube.com/embed/1w2Czj2OOco" frameborder="0" allowfullscreen></iframe>
 </center>
 
 ## The `CombatRule`
@@ -288,7 +288,7 @@ public class NearestFilter : TargetFilter
 
 The filters and selectors represent most of the boilerplate work of this whole prototype. This is because a new asset/SO instance needs to be created for each separate filter. On the upside, they need to only be created once and you're done.
 
-For some projects a simple health/mana filter split such as 10%, 20%, 30%... may not be enough. In those cases it's very much doable to get to have a single `HealthFilter` or even a general `StatFilter` SO class and have each gambit specify its own values. The basic idea is to decouple the state of the filter from the type of the filter, and treat the filter type as a sort of dictionary key. Essentially, the rules would stop containing filters and instead would contain pairs of filters with their associated data (serialized as part of the gambit that owns it). The custom editor would have to keep these in sync.
+For some projects a simple health/mana filter split such as 10%, 20%, 30%... may not be enough. In those cases it's very much doable to get to have a single `HealthFilter` or even a general `StatFilter` SO class and have each gambit specify its own values. The basic idea is to decouple the state of the filter from the type of the filter, and treat the filter type as a sort of dictionary key. Essentially, the rules would stop containing filters and instead would contain pairs of filters with their associated data (serialized as part of the gambit that owns it). The custom editor would have to keep these in sync (so, if the selected filter were a `StatFilter`, it should have and how some `StatFilteringData`).
 
 
 ## The `CharacterAction`
@@ -345,7 +345,7 @@ In a real project the Actions would represent most of the SO asset boilerplate. 
 
 The action SOs hold no state related to the characters performing actual actions, they just contain the details for how the action should proceed and a helper for the implied condition checks. 
 
-We need to have a handy way of actually triggering the actions, seeing when they complete and so on. The `ActionWrapper` is essentially a proxy for the `CombatAI` to check on the state of the `CharacterAbility` performing the action. It's meant to only be valid for a single action execution. It's a plain class.
+We need to have a handy way of actually triggering the actions, seeing when they complete and so on. The `ActionWrapper` is essentially a proxy for the `CombatAI` to check on the state of the `CharacterAbility` performing the action. It's meant to only be valid for a single action execution.
 
 ```cs
 // Non-critical code removed.
@@ -377,3 +377,5 @@ public class CastSpellActionWrapper : ActionWrapper
     }
 }
 ```
+
+This just about covers all the relevant bits of the AI system.
